@@ -32,43 +32,57 @@ Phase 1 is intentionally narrow. It gives you a vault, canonical note files, exp
         `-- parser.py
 ```
 
-## Install
+## Development Environment
 
-Python `3.10+` is required.
+The project should be developed in a repo-local `.venv`. Do not rely on a global interpreter for editor analysis or CLI work.
 
-```bash
-pip install -e .
+Python `3.10+` is required. Python `3.12` is the preferred target for this repo.
+
+Bootstrap the environment from PowerShell:
+
+```powershell
+.\scripts\bootstrap.ps1
 ```
+
+This creates `.venv`, seeds `pip` into it, and installs Roojai in editable mode.
+
+Manual fallback:
+
+```powershell
+.\scripts\bootstrap.ps1 -PythonExe "C:\path\to\python.exe"
+```
+
+If the editable install fails, the environment was created but dependency download did not complete. Re-run the final `pip install -e .` once package access is available.
 
 ## Quick Start
 
 Initialize a vault in the current working directory:
 
-```bash
+```powershell
 roojai init
 ```
 
 Create a note:
 
-```bash
+```powershell
 roojai note new "First Note" --type concept --tags ai,tools
 ```
 
 List notes:
 
-```bash
+```powershell
 roojai note list
 ```
 
 Import a Markdown file:
 
-```bash
+```powershell
 roojai ingest path/to/file.md
 ```
 
 Search:
 
-```bash
+```powershell
 roojai search notebook
 ```
 
@@ -127,10 +141,18 @@ Wiki-links in the body use `[[Title]]` syntax.
 
 ## Development
 
+The workspace is configured to use:
+
+```text
+${workspaceFolder}\.venv\Scripts\python.exe
+```
+
+If VS Code still points somewhere else, run `Python: Select Interpreter` and choose the `.venv` interpreter manually.
+
 Compile-check the package:
 
-```bash
-python -m compileall cli.py roojai
+```powershell
+.\.venv\Scripts\python -m compileall cli.py roojai
 ```
 
 The Phase 1 implementation contract lives in [docs/phase1spec.txt](docs/phase1spec.txt).

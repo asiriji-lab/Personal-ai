@@ -6,6 +6,9 @@ venv/
 
 vault/
 .tmp_smoke/
+.tmp-bootstrap/
+.uv-cache/
+.tmp-tests/
 
 .pytest_cache/
 .mypy_cache/

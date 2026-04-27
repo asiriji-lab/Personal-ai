@@ -14,7 +14,7 @@ from roojai.ingest.parser import ingest_markdown_file
 @click.group()
 @click.option("--vault", type=click.Path(path_type=Path, file_okay=False), default=None)
 @click.pass_context
-def main(ctx: click.Context, vault: Path | None) -> None:
+def cli(ctx: click.Context, vault: Path | None) -> None:
     ctx.ensure_object(dict)
     ctx.obj["vault"] = resolve_vault_paths(vault)
 
@@ -23,7 +23,7 @@ def get_store(paths: VaultPaths) -> NoteStore:
     return NoteStore(paths.db_path)
 
 
-@main.command("init")
+@cli.command("init")
 @click.pass_context
 def init_command(ctx: click.Context) -> None:
     paths: VaultPaths = ctx.obj["vault"]
@@ -32,7 +32,7 @@ def init_command(ctx: click.Context) -> None:
     click.echo(f"Initialized vault at {paths.root}")
 
 
-@main.group("note")
+@cli.group("note")
 def note_group() -> None:
     pass
 
@@ -54,7 +54,10 @@ def note_new(ctx: click.Context, title: str, note_type: str, tags: str) -> None:
         tags=[tag.strip() for tag in tags.split(",") if tag.strip()],
     )
     note.file_path = paths.note_path_for_id(note.id)
-    store.insert_note(note)
+    try:
+        store.insert_note(note)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     note.file_path.write_text(serialize_note(note), encoding="utf-8")
     if not open_in_editor(note.file_path):
         click.echo(str(note.file_path))
@@ -90,7 +93,7 @@ def note_list(ctx: click.Context, note_type: str | None) -> None:
         click.echo(f"{note.title}\t{note.note_type}\t{tags}")
 
 
-@main.command("ingest")
+@cli.command("ingest")
 @click.argument("file_path", type=click.Path(path_type=Path, exists=True, dir_okay=False))
 @click.pass_context
 def ingest_command(ctx: click.Context, file_path: Path) -> None:
@@ -102,7 +105,7 @@ def ingest_command(ctx: click.Context, file_path: Path) -> None:
     click.echo(f'Ingested "{note.title}" as {note.id}')
 
 
-@main.command("search")
+@cli.command("search")
 @click.argument("keyword")
 @click.pass_context
 def search_command(ctx: click.Context, keyword: str) -> None:
@@ -111,6 +114,10 @@ def search_command(ctx: click.Context, keyword: str) -> None:
     store.initialize()
     for result in store.search_notes(keyword):
         click.echo(f"{result['title']}\t{result['type']}\t{result['snippet']}")
+
+
+def main() -> None:
+    cli()
 
 
 if __name__ == "__main__":
