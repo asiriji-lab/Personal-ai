@@ -1,0 +1,193 @@
+Roojai Phase 1 Specification
+
+Summary
+
+Phase 1 builds the local-first foundation of Roojai: a CLI that creates and manages Markdown notes in a vault, mirrors note metadata into SQLite, imports Markdown files, extracts explicit wiki-links, and stores those links as graph edges. Phase 1 is deterministic only. It does not include LLMs, embeddings, MCP, dashboard, or evolution logic.
+
+Key Design Decisions
+
+- Note files are stored as `vault/notes/<uuid>.md`.
+- Titles live in frontmatter only. File paths never change on retitle.
+- Note titles are unique in Phase 1.
+- `source_path` is always stored as an absolute path at ingest time.
+- Edge type is frozen to `RELATED_TO`.
+- Edge weight is always `1.0`.
+- `note open <title>` uses exact title match only.
+- On title miss, the CLI exits nonzero and prints partial-match suggestions.
+- Stub notes are created for unresolved wiki-links.
+- Stub notes use `type: stub`, `status: stub`, and empty body content.
+- `content` defaults to empty string in both schema and model layer.
+
+Module List
+
+- `cli.py`: Click entrypoint and command registration.
+- `roojai/config.py`: vault path resolution and editor lookup.
+- `roojai/core/models.py`: note data model, defaults, validation helpers.
+- `roojai/core/markdown.py`: frontmatter parsing, note serialization, wiki-link extraction, heading extraction.
+- `roojai/core/store.py`: SQLite schema creation and note/edge CRUD helpers.
+- `roojai/ingest/parser.py`: import Markdown files into Roojai notes and explicit edges.
+
+Vault Layout
+
+- `vault/notes/`: stored Roojai note files.
+- `vault/system/`: system-managed text files.
+- `vault/system/review-queue.md`: unresolved link and stub review list.
+- `vault/graph.db`: SQLite database.
+
+SQLite Schema
+
+`notes` table:
+
+- `id TEXT PRIMARY KEY`
+- `title TEXT NOT NULL UNIQUE`
+- `type TEXT NOT NULL`
+- `tags TEXT NOT NULL`
+- `aliases TEXT NOT NULL`
+- `status TEXT NOT NULL`
+- `created TEXT NOT NULL`
+- `updated TEXT NOT NULL`
+- `source_path TEXT`
+- `content TEXT NOT NULL DEFAULT ''`
+- `file_path TEXT NOT NULL UNIQUE`
+
+`edges` table:
+
+- `source_id TEXT NOT NULL`
+- `target_id TEXT NOT NULL`
+- `type TEXT NOT NULL`
+- `weight REAL NOT NULL`
+- `created TEXT NOT NULL`
+- `PRIMARY KEY (source_id, target_id, type)`
+
+Indexes:
+
+- index on `notes.title`
+- index on `notes.type`
+- index on `edges.target_id`
+
+Markdown Frontmatter
+
+Required fields for normal notes:
+
+- `id`: UUID v4 string
+- `title`: unique note title
+- `type`: note type string
+- `tags`: list of strings
+- `created`: ISO date or datetime string
+- `updated`: ISO date or datetime string
+- `aliases`: list of strings
+
+Optional fields:
+
+- `status`: defaults to `active`
+- `source_path`: absolute source path for ingested notes
+
+Stub note rules:
+
+- `type: stub`
+- `status: stub`
+- `aliases: []`
+- `tags: []`
+- body content is empty string
+
+CLI Command Reference
+
+`roojai init [--vault PATH]`
+- Create `vault/`, `vault/notes/`, `vault/system/`, `vault/graph.db`, and `vault/system/review-queue.md`.
+- Initialize SQLite schema if missing.
+
+`roojai note new <title> [--type TYPE] [--tags tag1,tag2]`
+- Create a new UUID.
+- Write a Markdown note with frontmatter and empty body.
+- Insert note row into SQLite.
+- Open the file in `$EDITOR` if available.
+- Fail if title already exists.
+
+`roojai note open <title>`
+- Resolve by exact match on `notes.title`.
+- Open file in `$EDITOR` if available, otherwise print file path.
+- On miss, exit nonzero and print up to 5 case-insensitive partial-title suggestions.
+
+`roojai note list [--type TYPE]`
+- List all notes.
+- Output title, type, and tags.
+- Filter by exact type when `--type` is provided.
+
+`roojai ingest <file.md>`
+- Parse frontmatter if present.
+- Parse body content.
+- Extract wiki-links and headings.
+- Store imported note as a Roojai note under `vault/notes/<uuid>.md`.
+- Record original file path in `source_path` as absolute path.
+- Create `RELATED_TO` edges for wiki-links.
+
+`roojai search <keyword>`
+- Search `notes.title` and `notes.content` using SQL `LIKE`.
+- Return matching notes with short snippets around the first match.
+
+Ingest Behavior
+
+Input:
+- A single Markdown file path.
+
+Parsing:
+- Read YAML frontmatter if present.
+- Read Markdown body as plain stored content.
+- Extract headings for validation only.
+- Do not persist headings separately in Phase 1.
+
+Wiki-link extraction:
+- Match `[[Title]]` patterns from body content.
+- For each link target:
+  - resolve exact title match first
+  - if no title match, resolve exact alias match
+  - if still missing, create a stub note
+  - create a `RELATED_TO` edge from imported note to resolved or stub note
+  - append a review item to `vault/system/review-queue.md` for each created stub
+
+Imported note creation:
+- If the source file already contains valid Roojai frontmatter, preserve compatible fields.
+- If fields are missing, fill with Roojai defaults.
+- Always assign a Roojai-managed file path in `vault/notes/`.
+
+Search Behavior
+
+- Search mode is keyword only.
+- SQL pattern matching uses `LIKE` against `notes.title` and `notes.content`.
+- Results include:
+  - note title
+  - note type
+  - short snippet around first match
+- No ranking beyond database result order is required in Phase 1.
+
+Review Queue Format
+
+`vault/system/review-queue.md` is a plain Markdown checklist file.
+
+Each unresolved-link item must include:
+- unchecked status marker
+- stub note title
+- stub note id
+- source note title
+- source note id
+- timestamp
+
+Example format:
+
+- [ ] Resolve stub: "NotebookLM API"
+  stub_id: 123e4567-e89b-12d3-a456-426614174000
+  source_note: "AI Research Tools"
+  source_id: 223e4567-e89b-12d3-a456-426614174000
+  created: 2026-04-27T16:00:00Z
+
+Assumptions
+
+- Phase 1 enforces unique titles.
+- Phase 1 supports only one edge type: `RELATED_TO`.
+- Phase 1 stores no embeddings or vector data.
+- Phase 1 performs no LLM extraction or semantic analysis.
+- Phase 1 creates edges only from explicit wiki-links.
+- Phase 1 does not support fuzzy title resolution.
+- Phase 1 does not support interactive review workflows beyond the Markdown review queue.
+- Phase 1 does not support bulk ingest directories unless added later.
+

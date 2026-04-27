@@ -1,0 +1,14 @@
+I'm building a local-first personal knowledge system called Roojai. The system uses Markdown files for notes, SQLite for a typed knowledge graph, and LanceDB for embeddings. It has a CLI and an MCP server.
+
+I need a precise, actionable specification for one small piece of the system: [TOPIC].
+
+Please produce:
+1. A short, plain-English description of what this piece does.
+2. The exact data structures, schemas, or function signatures (Python where relevant).
+3. At least one concrete example showing input and expected output.
+4. Any important edge cases or constraints (e.g., "notes must have UUID v4 id", "edges are directional").
+5. No fluff, no citations unless strictly needed, and no forward references to features not yet built.
+
+Keep the output under 500 words. Write in the same factual, blueprint style as the attached architecture document but more granular.
+
+If you need to make a reasonable assumption, state it explicitly.
