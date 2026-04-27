@@ -1,0 +1,64 @@
+Roojai Work Log
+
+2026-04-27
+
+Completed
+
+- Implemented the Roojai Phase 1 CLI foundation.
+- Added `roojai init`, `roojai note new`, `roojai note open`, `roojai note list`, `roojai ingest`, and `roojai search`.
+- Implemented canonical note storage under `vault/notes/<uuid>.md`.
+- Implemented SQLite-backed `notes` and `edges` tables in `vault/graph.db`.
+- Implemented Markdown frontmatter parsing and note serialization.
+- Implemented wiki-link extraction for `[[Title]]`.
+- Implemented stub note creation for unresolved wiki-links.
+- Implemented review queue append behavior in `vault/system/review-queue.md`.
+- Implemented keyword search over note title and content using SQL `LIKE`.
+
+Environment and Tooling
+
+- Added `README.md` with project overview, setup, quick start, and Phase 1 constraints.
+- Added `.gitignore` for Python artifacts, vault data, and local bootstrap/temp directories.
+- Added `.vscode/settings.json` to target the repo-local `.venv`.
+- Added `.vscode/extensions.json` with Python and Pylance recommendations.
+- Added `scripts/bootstrap.ps1` for repo-local environment setup.
+- Initialized Git and connected remote `origin` to `https://github.com/asiriji-lab/Personal-ai.git`.
+- Created and pushed branch `roojai-phase1`.
+
+Testing and Verification
+
+- Added CLI-focused unittest coverage in `tests/test_cli.py`.
+- Covered init, note creation, duplicate title rejection, open miss suggestions, type-filtered list, ingest with stubs and edges, and search.
+- Verified:
+  - `python -m unittest -v`
+  - `python -m compileall cli.py roojai tests`
+
+CI
+
+- Added GitHub Actions workflow at `.github/workflows/ci.yml`.
+- Workflow installs the package on Python 3.12, runs compile checks, and runs the unittest suite on push and pull request.
+
+Fixes Made During Implementation
+
+- Refactored the Click entrypoint so Pylance no longer flags the `main()` call signature.
+- Wrapped duplicate note insertion errors in `click.ClickException` so CLI failures are user-facing instead of raw exceptions.
+- Normalized VS Code workspace settings to use `.venv` instead of a machine-specific global interpreter path.
+
+Known Local Machine Issues
+
+- This machine has temp-directory permission problems affecting `venv`, `ensurepip`, and some `pip` operations.
+- This machine also has restricted network/package access from the sandbox.
+- The repo-side workflow is set up correctly, but fully clean environment bootstrap may still require local machine cleanup outside the repo.
+
+Current Git State
+
+- Recent commits:
+  - `13cdc18` Add tests and bootstrap workflow
+  - `ad14659` Add initial implementation of Roojai knowledge system with CLI commands and Markdown support
+
+Recommended Next Work
+
+- Open or complete a PR for `roojai-phase1`.
+- Review the first GitHub Actions run.
+- Harden malformed frontmatter handling.
+- Decide how repeated unresolved wiki-links should behave in the review queue.
+- Improve duplicate-ingest behavior.

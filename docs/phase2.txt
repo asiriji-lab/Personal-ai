@@ -1,0 +1,247 @@
+Roojai Phase 2 Specification
+
+Summary
+
+Phase 2 adds AI-assisted entity extraction to Roojai ingestion for Markdown, text, and PDF sources. The system extracts entities, relationships, and reviewable claims, validates claims with a local model when available, and writes all AI-derived claims into the existing review queue. Phase 2 does not add embeddings, vector search, MCP, or evolution features.
+
+Key Design Decisions
+
+- Phase 2 is entity-centric. Extracted entities may become notes; extracted claims do not become standalone notes.
+- Claims are stored as review items in `vault/system/review-queue.md` with source context and validation results.
+- Entity notes use `title` as the human identifier and follow Phase 1 title uniqueness constraints.
+- Deduplication for ingested entities is case-insensitive exact match after trimming `title`.
+- Extraction model is Gemini 1.5 Flash using `GEMINI_API_KEY`.
+- Validation model is local Ollama with default endpoint `http://localhost:11434` and model `qwen3.5:4b`.
+- Validation is best-effort. If Ollama is unavailable, extraction continues and review entries record validation as skipped.
+- If Gemini is unavailable, non-Markdown ingest fails with a friendly error and persists no AI-extracted data.
+- If Gemini is unavailable for `.md` ingest, Roojai falls back to Phase 1 Markdown ingest behavior.
+- Phase 2 continues to use only `RELATED_TO` edges.
+- Unresolved extracted entities create pending-review entity notes, not stubs.
+- Stubs remain limited to unresolved wiki-links discovered in Markdown content.
+
+Module List
+
+- `cli.py`: add `review` command and `note list --status` filtering.
+- `roojai/config.py`: extend model configuration lookup from environment.
+- `roojai/core/models.py`: extend note model with confidence, rationale, and source chunk metadata.
+- `roojai/core/markdown.py`: unchanged parsing responsibilities from Phase 1; still handles wiki-links and frontmatter.
+- `roojai/core/store.py`: apply additive schema migration, status filtering, and new note fields.
+- `roojai/ingest/parser.py`: orchestrate file-type detection, chunking, extraction, validation, note creation, and review logging.
+- `roojai/ingest/prompts.py`: store extraction and validation prompt templates used by Phase 2.
+- `roojai/ingest/extractor.py`: Gemini extraction client and response parsing.
+- `roojai/ingest/validator.py`: Ollama validation client and response parsing.
+- `roojai/ingest/pdf.py`: local PDF-to-text extraction helper.
+
+Vault Layout
+
+- `vault/notes/`: Roojai-managed note files.
+- `vault/system/review-queue.md`: Markdown checklist for unresolved wiki-links and AI-generated claims.
+- `vault/system/extraction_log.jsonl`: append-only raw extraction and validation responses for debugging.
+- `vault/graph.db`: SQLite database.
+
+SQLite Schema
+
+`notes` table additions:
+
+- `source_chunk_index INTEGER`
+- `confidence REAL DEFAULT 0.5`
+- `rationale TEXT`
+
+`edges` table:
+
+- unchanged from Phase 1
+
+Migration rules:
+
+- Existing Phase 1 vaults must be upgraded in place.
+- Migration is additive only.
+- Store initialization must detect missing Phase 2 columns and add them with `ALTER TABLE`.
+- Existing note rows must remain valid after migration without backfill beyond SQLite defaults.
+
+Markdown Frontmatter
+
+Phase 1 required fields remain:
+
+- `id`
+- `title`
+- `type`
+- `tags`
+- `created`
+- `updated`
+- `aliases`
+
+Phase 2 note metadata rules:
+
+- `status` may be `active`, `stub`, or `pending_review`.
+- `source_path` remains absolute for ingested notes.
+- `source_chunk_index` is stored in SQLite metadata and does not need to appear in frontmatter.
+- `confidence` is stored in SQLite metadata and may optionally be mirrored into frontmatter only if the implementation already writes it consistently.
+- `rationale` is stored in SQLite metadata and does not need to appear in frontmatter.
+
+Entity Note Creation Rules
+
+- Allowed extracted entity note types are `concept`, `person`, `project`, and `tool`.
+- When creating a new entity note from extraction, use the extracted `type` if it matches the allowed set.
+- If extracted `type` is missing or outside the allowed set, default note type to `concept`.
+- New entity notes created from extraction use `status: pending_review`.
+- Entity confidence is derived from claims whose `associated_entities` include the entity title.
+- If multiple associated claims exist, entity confidence is the maximum of their `confidence` values.
+- If no associated claims exist, entity confidence defaults to `0.5`.
+
+Extraction Output Format
+
+The Gemini extraction prompt must return this JSON shape:
+
+```json
+{
+  "entities": [
+    { "title": "...", "type": "concept|person|project|tool" }
+  ],
+  "edges": [
+    { "source_title": "...", "target_title": "...", "type": "RELATED_TO" }
+  ],
+  "claims": [
+    {
+      "text": "...",
+      "confidence": 0.8,
+      "rationale": "...",
+      "associated_entities": ["Entity Title A", "Entity Title B"]
+    }
+  ]
+}
+```
+
+Validator Output Format
+
+The local validator must return this JSON shape:
+
+```json
+{
+  "verdict": "pass|fail",
+  "explanation": "..."
+}
+```
+
+Review Queue Format
+
+`vault/system/review-queue.md` remains a plain Markdown checklist.
+
+Each AI-generated review entry must include:
+
+- unchecked status marker
+- source file path
+- chunk index
+- extracted claim text
+- confidence
+- validator verdict: `pass`, `fail`, or `skipped`
+- validator explanation
+- timestamp
+
+Example format:
+
+- [ ] Review claim: "Gemini 1.5 Flash supports structured JSON output."
+  source_path: D:\docs\sample.pdf
+  chunk_index: 2
+  confidence: 0.82
+  validator_verdict: pass
+  validator_explanation: Claim matches the referenced paragraph.
+  created: 2026-04-27T16:00:00Z
+
+Ingestion Pipeline
+
+Accepted input:
+
+- `.md`
+- `.txt`
+- `.pdf`
+
+File handling:
+
+- `.md`: parse Markdown content and frontmatter as in Phase 1, plus Phase 2 AI extraction when Gemini is available.
+- `.txt`: read raw text and send through Phase 2 extraction.
+- `.pdf`: extract raw text with `PyMuPDF` or `pdfplumber` before chunking.
+
+Chunking:
+
+- Split text by heading when headings are available.
+- Otherwise split by paragraph blocks.
+- Preserve absolute `source_path` and zero-based `chunk_index` for each chunk.
+
+Extraction flow:
+
+- Detect input file type.
+- For `.pdf`, convert to text locally before chunking.
+- For each chunk, call Gemini 1.5 Flash using the prompt template in `roojai/ingest/prompts.py`.
+- Parse extraction JSON into entities, edges, and claims.
+- Append raw Gemini responses to `vault/system/extraction_log.jsonl`.
+
+Validation flow:
+
+- For each extracted claim, call the local validator with the source chunk and claim text.
+- Validator returns JSON with `verdict` and `explanation`.
+- If Ollama is unavailable or returns an unusable response, mark validation as `skipped`.
+- Append raw validator responses to `vault/system/extraction_log.jsonl`.
+
+Persistence rules:
+
+- If Gemini is unavailable for `.pdf` or `.txt`, abort ingest with a friendly error and do not persist AI-derived entities, edges, or claims.
+- If Gemini is unavailable for `.md`, run Phase 1 ingest only.
+- For each extracted entity:
+  - deduplicate by case-insensitive exact title match after trim
+  - if matched, reuse the existing note
+  - if not matched, create a new entity note with `status: pending_review`
+- For each extracted edge:
+  - resolve both endpoints against existing or newly created entity notes
+  - create a `RELATED_TO` edge even if associated claims are still pending review
+- For each extracted claim:
+  - do not create a note
+  - append a structured review queue entry
+  - do not append claim text to note bodies in Phase 2
+
+Markdown-specific behavior:
+
+- Wiki-link extraction and stub behavior from Phase 1 remain unchanged.
+- Unresolved wiki-links still create stubs and stub review entries.
+- Extracted entities from AI output do not create stubs; they create pending-review entity notes.
+
+CLI Command Reference
+
+`roojai ingest <path>`
+- Auto-detect `.md`, `.txt`, or `.pdf`.
+- Run Phase 2 extraction flow when Gemini is available.
+- Fall back to Phase 1 behavior for `.md` when Gemini is unavailable.
+
+`roojai review`
+- Print `vault/system/review-queue.md` contents.
+
+`roojai note list [--type TYPE] [--status STATUS]`
+- Retain Phase 1 type filtering.
+- Add exact status filtering.
+
+Search Behavior
+
+- Search remains keyword-only in Phase 2.
+- Search still uses SQL `LIKE` against note title and content.
+- AI claims in the review queue are not part of note search unless they have later been approved into note content in a future phase.
+
+Test Plan
+
+- Ingest a small PDF with known entities and claims; verify entity notes are created with `pending_review`.
+- Verify no extracted claim becomes a standalone note.
+- Verify entity confidence equals the maximum confidence among associated claims.
+- Verify a hallucinated claim is written to the review queue with `validator_verdict: fail` and explanation.
+- Ingest the same PDF twice; verify no duplicate entity notes are created.
+- Simulate Ollama unavailability; verify extraction continues and review entries use `validator_verdict: skipped`.
+- Simulate Gemini unavailability for `.md`; verify ingest falls back to Phase 1 wiki-link behavior.
+- Simulate Gemini unavailability for `.pdf` or `.txt`; verify ingest fails cleanly and persists no AI-derived data.
+- Run migration against a Phase 1 vault; verify added columns exist and existing commands still work.
+
+Assumptions
+
+- `GEMINI_API_KEY` is available in the environment for AI extraction.
+- Ollama is reachable at `http://localhost:11434` by default.
+- Default validator model name is `qwen3.5:4b`.
+- Prompt templates are versioned in `roojai/ingest/prompts.py`.
+- Phase 2 does not merge notes automatically.
+- Phase 2 does not detect contradictions automatically.
+- Phase 2 does not add embeddings, vector search, MCP tools, or dashboard changes.
