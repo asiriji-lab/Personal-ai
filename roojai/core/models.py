@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-import uuid
+
+
+ALLOWED_ENTITY_NOTE_TYPES = {"concept", "person", "project", "tool"}
 
 
 def utc_now_iso() -> str:
@@ -21,6 +24,9 @@ class Note:
     updated: str = field(default_factory=utc_now_iso)
     status: str = "active"
     source_path: str | None = None
+    source_chunk_index: int | None = None
+    confidence: float = 0.5
+    rationale: str | None = None
     content: str = ""
     file_path: Path = field(default_factory=Path)
 
@@ -33,6 +39,11 @@ class Note:
         self.tags = [tag.strip() for tag in self.tags if tag and tag.strip()]
         self.aliases = [alias.strip() for alias in self.aliases if alias and alias.strip()]
         self.content = self.content or ""
+        self.confidence = float(self.confidence)
+        if self.source_chunk_index is not None:
+            self.source_chunk_index = int(self.source_chunk_index)
+        if self.rationale is not None:
+            self.rationale = self.rationale.strip() or None
 
     @classmethod
     def new(
@@ -43,6 +54,9 @@ class Note:
         tags: list[str] | None = None,
         aliases: list[str] | None = None,
         source_path: str | None = None,
+        source_chunk_index: int | None = None,
+        confidence: float = 0.5,
+        rationale: str | None = None,
         content: str = "",
         status: str = "active",
     ) -> "Note":
@@ -58,6 +72,9 @@ class Note:
             updated=timestamp,
             status=status,
             source_path=source_path,
+            source_chunk_index=source_chunk_index,
+            confidence=confidence,
+            rationale=rationale,
             content=content,
             file_path=file_path or Path(f"{note_id}.md"),
         )

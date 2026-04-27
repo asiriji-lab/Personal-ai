@@ -4,11 +4,12 @@ from pathlib import Path
 
 import click
 
-from roojai.config import VaultPaths, open_in_editor, resolve_vault_paths
+from roojai.config import AIConfig, VaultPaths, open_in_editor, resolve_ai_config, resolve_vault_paths
 from roojai.core.markdown import serialize_note
 from roojai.core.models import Note
 from roojai.core.store import NoteStore
-from roojai.ingest.parser import ingest_markdown_file
+from roojai.ingest.extractor import ExtractionUnavailableError
+from roojai.ingest.parser import ingest_file
 
 
 @click.group()
@@ -17,10 +18,15 @@ from roojai.ingest.parser import ingest_markdown_file
 def cli(ctx: click.Context, vault: Path | None) -> None:
     ctx.ensure_object(dict)
     ctx.obj["vault"] = resolve_vault_paths(vault)
+    ctx.obj["ai"] = resolve_ai_config()
 
 
 def get_store(paths: VaultPaths) -> NoteStore:
     return NoteStore(paths.db_path)
+
+
+def get_ai_config(ctx: click.Context) -> AIConfig:
+    return ctx.obj["ai"]
 
 
 @cli.command("init")
@@ -83,14 +89,15 @@ def note_open(ctx: click.Context, title: str) -> None:
 
 @note_group.command("list")
 @click.option("--type", "note_type", default=None)
+@click.option("--status", default=None)
 @click.pass_context
-def note_list(ctx: click.Context, note_type: str | None) -> None:
+def note_list(ctx: click.Context, note_type: str | None, status: str | None) -> None:
     paths: VaultPaths = ctx.obj["vault"]
     store = get_store(paths)
     store.initialize()
-    for note in store.list_notes(note_type=note_type):
+    for note in store.list_notes(note_type=note_type, status=status):
         tags = ", ".join(note.tags)
-        click.echo(f"{note.title}\t{note.note_type}\t{tags}")
+        click.echo(f"{note.title}\t{note.note_type}\t{note.status}\t{tags}")
 
 
 @cli.command("ingest")
@@ -102,10 +109,27 @@ def ingest_command(ctx: click.Context, file_path: Path) -> None:
     store = get_store(paths)
     store.initialize()
     try:
-        note = ingest_markdown_file(paths, store, file_path)
-    except ValueError as exc:
+        result = ingest_file(paths, store, file_path, get_ai_config(ctx))
+    except (ValueError, ExtractionUnavailableError) as exc:
         raise click.ClickException(str(exc)) from exc
-    click.echo(f'Ingested "{note.title}" as {note.id}')
+    if result.primary_note is not None:
+        click.echo(
+            f'Ingested "{result.primary_note.title}" as {result.primary_note.id} '
+            f"(entities={result.entities_created}, review_items={result.review_items_added})"
+        )
+    else:
+        click.echo(
+            f"Ingested {file_path.name} "
+            f"(entities={result.entities_created}, review_items={result.review_items_added})"
+        )
+
+
+@cli.command("review")
+@click.pass_context
+def review_command(ctx: click.Context) -> None:
+    paths: VaultPaths = ctx.obj["vault"]
+    paths.ensure_layout()
+    click.echo(paths.review_queue_path.read_text(encoding="utf-8"), nl=False)
 
 
 @cli.command("search")

@@ -48,6 +48,18 @@ class NoteStore:
                 CREATE INDEX IF NOT EXISTS idx_edges_target_id ON edges(target_id);
                 """
             )
+            self._migrate_notes_table(connection)
+
+    def _migrate_notes_table(self, connection: sqlite3.Connection) -> None:
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(notes)").fetchall()
+        }
+        if "source_chunk_index" not in columns:
+            connection.execute("ALTER TABLE notes ADD COLUMN source_chunk_index INTEGER")
+        if "confidence" not in columns:
+            connection.execute("ALTER TABLE notes ADD COLUMN confidence REAL DEFAULT 0.5")
+        if "rationale" not in columns:
+            connection.execute("ALTER TABLE notes ADD COLUMN rationale TEXT")
 
     def insert_note(self, note: Note) -> None:
         try:
@@ -56,8 +68,9 @@ class NoteStore:
                     """
                     INSERT INTO notes (
                         id, title, type, tags, aliases, status, created, updated,
-                        source_path, content, file_path
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        source_path, source_chunk_index, confidence, rationale,
+                        content, file_path
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         note.id,
@@ -69,6 +82,9 @@ class NoteStore:
                         note.created,
                         note.updated,
                         note.source_path,
+                        note.source_chunk_index,
+                        note.confidence,
+                        note.rationale,
                         note.content,
                         str(note.file_path),
                     ),
@@ -86,6 +102,19 @@ class NoteStore:
             ).fetchone()
         return self._row_to_note(row) if row else None
 
+    def get_note_by_normalized_title(self, title: str) -> Note | None:
+        normalized = title.strip()
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM notes
+                WHERE lower(trim(title)) = lower(trim(?))
+                LIMIT 1
+                """,
+                (normalized,),
+            ).fetchone()
+        return self._row_to_note(row) if row else None
+
     def get_note_by_alias(self, alias: str) -> Note | None:
         with self.connect() as connection:
             rows = connection.execute("SELECT * FROM notes").fetchall()
@@ -95,15 +124,21 @@ class NoteStore:
                 return note
         return None
 
-    def list_notes(self, note_type: str | None = None) -> list[Note]:
+    def list_notes(self, note_type: str | None = None, status: str | None = None) -> list[Note]:
         query = "SELECT * FROM notes"
-        params: tuple[str, ...] = ()
+        clauses: list[str] = []
+        params: list[str] = []
         if note_type is not None:
-            query += " WHERE type = ?"
-            params = (note_type,)
+            clauses.append("type = ?")
+            params.append(note_type)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
         query += " ORDER BY title COLLATE NOCASE"
         with self.connect() as connection:
-            rows = connection.execute(query, params).fetchall()
+            rows = connection.execute(query, tuple(params)).fetchall()
         return [self._row_to_note(row) for row in rows]
 
     def suggest_titles(self, partial: str, limit: int = 5) -> list[str]:
@@ -183,6 +218,9 @@ class NoteStore:
             updated=row["updated"],
             status=row["status"],
             source_path=row["source_path"],
+            source_chunk_index=row["source_chunk_index"] if "source_chunk_index" in row.keys() else None,
+            confidence=row["confidence"] if "confidence" in row.keys() and row["confidence"] is not None else 0.5,
+            rationale=row["rationale"] if "rationale" in row.keys() else None,
             content=row["content"],
             file_path=Path(row["file_path"]),
         )

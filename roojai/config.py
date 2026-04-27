@@ -14,6 +14,7 @@ class VaultPaths:
     system_dir: Path
     db_path: Path
     review_queue_path: Path
+    extraction_log_path: Path
 
     def ensure_layout(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -21,10 +22,19 @@ class VaultPaths:
         self.system_dir.mkdir(parents=True, exist_ok=True)
         if not self.review_queue_path.exists():
             self.review_queue_path.write_text("", encoding="utf-8")
+        if not self.extraction_log_path.exists():
+            self.extraction_log_path.write_text("", encoding="utf-8")
 
     def note_path_for_id(self, note_id: str | None = None) -> Path:
         resolved_id = note_id or str(uuid.uuid4())
         return self.notes_dir / f"{resolved_id}.md"
+
+
+@dataclass(frozen=True)
+class AIConfig:
+    gemini_api_key: str | None
+    ollama_url: str
+    ollama_model: str
 
 
 def resolve_vault_paths(vault_root: Path | None) -> VaultPaths:
@@ -35,6 +45,15 @@ def resolve_vault_paths(vault_root: Path | None) -> VaultPaths:
         system_dir=root / "system",
         db_path=root / "graph.db",
         review_queue_path=root / "system" / "review-queue.md",
+        extraction_log_path=root / "system" / "extraction_log.jsonl",
+    )
+
+
+def resolve_ai_config() -> AIConfig:
+    return AIConfig(
+        gemini_api_key=os.environ.get("GEMINI_API_KEY"),
+        ollama_url=os.environ.get("ROOJAI_OLLAMA_URL", "http://localhost:11434"),
+        ollama_model=os.environ.get("ROOJAI_OLLAMA_MODEL", "qwen3.5:4b"),
     )
 
 
