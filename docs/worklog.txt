@@ -62,3 +62,65 @@ Recommended Next Work
 - Harden malformed frontmatter handling.
 - Decide how repeated unresolved wiki-links should behave in the review queue.
 - Improve duplicate-ingest behavior.
+
+2026-04-27 (Phase 2)
+
+Completed
+
+- Implemented the Phase 2 ingestion foundation described in `docs/phase2.txt`.
+- Extended `roojai ingest` to route `.md`, `.txt`, and `.pdf` inputs.
+- Preserved Phase 1 Markdown ingest and added Phase 2 AI extraction on top when Gemini is available.
+- Added Phase 1 fallback for Markdown ingest when Gemini is unavailable.
+- Added entity-centric AI ingestion: extracted entities create `pending_review` notes; claims do not become notes.
+- Added structured AI claim entries to `vault/system/review-queue.md`.
+- Added `vault/system/extraction_log.jsonl` for raw extraction and validation responses.
+- Added `roojai review` command.
+- Added `roojai note list --status` filtering.
+
+Schema and Model Changes
+
+- Added additive notes-table migration for:
+  - `source_chunk_index`
+  - `confidence`
+  - `rationale`
+- Extended the note model to carry Phase 2 metadata.
+- Added case-insensitive trimmed-title deduplication for extracted entities.
+
+New Modules
+
+- Added `roojai/ingest/prompts.py`.
+- Added `roojai/ingest/extractor.py`.
+- Added `roojai/ingest/validator.py`.
+- Added `roojai/ingest/pdf.py`.
+
+Testing and Verification
+
+- Expanded `tests/test_cli.py` to cover:
+  - Phase 2 PDF ingest with entity creation and claim queue entries
+  - validator skipped behavior when Ollama is unavailable
+  - Markdown fallback when Gemini is unavailable
+  - duplicate entity dedup on repeated ingest
+  - additive schema migration from a Phase 1 vault
+- Added two spec-alignment regression tests:
+  - Markdown fallback when Gemini fails at runtime
+  - skipped validation when validator output is invalid
+- Verified:
+  - `python -m unittest -v` -> 15/15 passing
+  - `python -m compileall cli.py roojai tests`
+
+Spec Alignment Fixes
+
+- Fixed a Phase 2 mismatch where Markdown ingest could partially persist then fail if Gemini was configured but unreachable.
+- Fixed a Phase 2 mismatch where invalid validator output aborted ingest instead of degrading to `validator_verdict: skipped`.
+
+Still Not Verified Live
+
+- Real Gemini API calls against the current extractor implementation
+- Real Ollama responses against the current validator implementation
+- Real PDF extraction with installed `PyMuPDF` or `pdfplumber`
+
+Recommended Next Work
+
+- Commit and push the Phase 2 implementation changes.
+- Update `README.md` to describe the current Phase 2 behavior and runtime requirements.
+- Run one live smoke test with Gemini, Ollama, and a real PDF before treating Phase 2 as production-ready.
