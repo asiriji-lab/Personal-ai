@@ -101,7 +101,10 @@ def ingest_command(ctx: click.Context, file_path: Path) -> None:
     paths.ensure_layout()
     store = get_store(paths)
     store.initialize()
-    note = ingest_markdown_file(paths, store, file_path)
+    try:
+        note = ingest_markdown_file(paths, store, file_path)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     click.echo(f'Ingested "{note.title}" as {note.id}')
 
 

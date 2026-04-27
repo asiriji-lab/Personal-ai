@@ -147,3 +147,70 @@ class RoojaiCliTests(TestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("Notebook Tools\tnote\tNotebook Tools", result.output)
         self.assertIn("Imported Search Note\tnote\tThis body mentions notebook workflows.", result.output)
+
+    def test_ingest_malformed_frontmatter_returns_friendly_error(self) -> None:
+        self.invoke("init")
+
+        source_file = self.workspace / "broken.md"
+        source_file.write_text(
+            "---\n"
+            "title: Broken Note\n"
+            "aliases: [one, two\n"
+            "---\n"
+            "Body text.\n",
+            encoding="utf-8",
+        )
+
+        result = self.invoke("ingest", str(source_file))
+
+        self.assertEqual(result.exit_code, 1, result.output)
+        self.assertIn("Invalid YAML frontmatter.", result.output)
+        self.assertNotIn("Traceback", result.output)
+
+    def test_ingest_reuses_existing_stub_and_review_entry(self) -> None:
+        self.invoke("init")
+
+        first_file = self.workspace / "first.md"
+        first_file.write_text(
+            "---\n"
+            "title: First Import\n"
+            "---\n"
+            "Links to [[New Concept]].\n",
+            encoding="utf-8",
+        )
+        second_file = self.workspace / "second.md"
+        second_file.write_text(
+            "---\n"
+            "title: Second Import\n"
+            "---\n"
+            "Also links to [[New Concept]].\n",
+            encoding="utf-8",
+        )
+
+        first_result = self.invoke("ingest", str(first_file))
+        second_result = self.invoke("ingest", str(second_file))
+
+        self.assertEqual(first_result.exit_code, 0, first_result.output)
+        self.assertEqual(second_result.exit_code, 0, second_result.output)
+
+        review_queue = (self.vault / "system" / "review-queue.md").read_text(encoding="utf-8")
+        self.assertEqual(review_queue.count('Resolve stub: "New Concept"'), 1)
+
+        with sqlite3.connect(self.vault / "graph.db") as connection:
+            stub_rows = connection.execute(
+                "SELECT id FROM notes WHERE title = ?",
+                ("New Concept",),
+            ).fetchall()
+            edges = connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM edges
+                WHERE target_id = (
+                    SELECT id FROM notes WHERE title = ?
+                )
+                """,
+                ("New Concept",),
+            ).fetchone()
+
+        self.assertEqual(len(stub_rows), 1)
+        self.assertEqual(edges[0], 2)

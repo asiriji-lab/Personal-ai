@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 import yaml
+from yaml import YAMLError
 
 from roojai.core.models import Note
 
@@ -26,7 +27,10 @@ def parse_markdown_text(raw_text: str) -> tuple[dict, str]:
 
     frontmatter_text = parts[1]
     body = parts[2].lstrip("\r\n")
-    data = yaml.safe_load(frontmatter_text) or {}
+    try:
+        data = yaml.safe_load(frontmatter_text) or {}
+    except YAMLError as exc:
+        raise ValueError("Invalid YAML frontmatter.") from exc
     if not isinstance(data, dict):
         raise ValueError("Frontmatter must be a YAML mapping.")
     return data, body
